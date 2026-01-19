@@ -14,7 +14,9 @@
       "Bash(wc:*)",
       "Bash(xargs cat:*)",
       "Bash(grep:*)",
-      "Bash(xargs ls:*)"
+      "Bash(xargs ls:*)",
+      "Bash(bash gradlew:*)",
+      "Bash(chmod:*)"
     ]
   }
 }
