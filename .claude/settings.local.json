@@ -8,7 +8,9 @@
       "WebSearch",
       "Bash(tree:*)",
       "Bash(gradle wrapper:*)",
-      "Bash(./gradlew:*)"
+      "Bash(./gradlew:*)",
+      "Bash(curl:*)",
+      "Bash(python3:*)"
     ]
   }
 }
