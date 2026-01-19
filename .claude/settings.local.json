@@ -3,7 +3,12 @@
     "allow": [
       "Bash(find:*)",
       "Bash(./gradlew clean compileKotlin:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "WebFetch(domain:www.wanted.co.kr)",
+      "WebSearch",
+      "Bash(tree:*)",
+      "Bash(gradle wrapper:*)",
+      "Bash(./gradlew:*)"
     ]
   }
 }

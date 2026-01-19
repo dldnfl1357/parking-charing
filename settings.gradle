@@ -1,0 +1,6 @@
+rootProject.name = 'parking-charging'
+
+include 'common'
+include 'collection'
+include 'processing'
+include 'api'
