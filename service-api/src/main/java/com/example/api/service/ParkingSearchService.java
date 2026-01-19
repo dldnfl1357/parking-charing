@@ -8,6 +8,9 @@ import com.example.api.repository.ParkingSearchRepository;
 import com.example.common.domain.FacilityType;
 import com.example.common.domain.entity.Facility;
 import com.example.common.util.GeoUtils;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
@@ -15,7 +18,9 @@ import org.springframework.data.elasticsearch.core.SearchHit;
 import org.springframework.data.elasticsearch.core.SearchHits;
 import org.springframework.stereotype.Service;
 
+import java.text.NumberFormat;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 주차장 검색 서비스 (MySQL / ElasticSearch)
@@ -27,6 +32,7 @@ public class ParkingSearchService {
 
     private final ParkingSearchRepository parkingSearchRepository;
     private final FacilityRepository facilityRepository;
+    private final ObjectMapper objectMapper;
 
     /**
      * 위치 기반 주차장 검색 (ES)
@@ -57,6 +63,9 @@ public class ParkingSearchService {
             distance = ((Number) sortValues.get(0)).doubleValue();
         }
 
+        // extraInfo 파싱
+        JsonNode extraInfo = parseExtraInfo(doc.getExtraInfo());
+
         return ParkingResponse.builder()
                 .id(doc.getId() != null ? Long.parseLong(doc.getId()) : null)
                 .externalId(doc.getExternalId())
@@ -67,6 +76,11 @@ public class ParkingSearchService {
                 .totalCount(doc.getTotalCount())
                 .availableCount(doc.getAvailableCount())
                 .distance(distance != null ? Math.round(distance * 100.0) / 100.0 : null)
+                .baseFee(extractBaseFee(extraInfo))
+                .addFee(extractAddFee(extraInfo))
+                .dayMaxCrg(extractDayMaxCrg(extraInfo))
+                .weekdayOperTime(extractStringField(extraInfo, "weekdayOperTime"))
+                .source(extractStringField(extraInfo, "source"))
                 .build();
     }
 
@@ -114,6 +128,9 @@ public class ParkingSearchService {
                 facility.getLocation().getLatitude(),
                 facility.getLocation().getLongitude());
 
+        // extraInfo 파싱
+        JsonNode extraInfo = parseExtraInfo(facility.getExtraInfo());
+
         return ParkingResponse.builder()
                 .id(facility.getId())
                 .externalId(facility.getExternalId())
@@ -124,6 +141,107 @@ public class ParkingSearchService {
                 .totalCount(facility.getAvailability().getTotalCount())
                 .availableCount(facility.getAvailability().getAvailableCount())
                 .distance(Math.round(distance * 100.0) / 100.0)
+                .baseFee(extractBaseFee(extraInfo))
+                .addFee(extractAddFee(extraInfo))
+                .dayMaxCrg(extractDayMaxCrg(extraInfo))
+                .weekdayOperTime(extractStringField(extraInfo, "weekdayOperTime"))
+                .source(extractStringField(extraInfo, "source"))
                 .build();
+    }
+
+    // === extraInfo 파싱 헬퍼 메서드 ===
+
+    private JsonNode parseExtraInfo(String extraInfoJson) {
+        if (extraInfoJson == null || extraInfoJson.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(extraInfoJson);
+        } catch (JsonProcessingException e) {
+            log.warn("Failed to parse extraInfo: {}", extraInfoJson, e);
+            return null;
+        }
+    }
+
+    private String extractBaseFee(JsonNode extraInfo) {
+        if (extraInfo == null) {
+            return null;
+        }
+
+        // TS API 형식: "baseFee": "30분 1000원"
+        if (extraInfo.has("baseFee") && extraInfo.get("baseFee").isTextual()) {
+            return extraInfo.get("baseFee").asText();
+        }
+
+        // 공공데이터 형식: baseFee (숫자) + baseMinutes
+        if (extraInfo.has("baseFee") && extraInfo.get("baseFee").isNumber()) {
+            int baseFee = extraInfo.get("baseFee").asInt();
+            int baseMinutes = extraInfo.has("baseMinutes") ? extraInfo.get("baseMinutes").asInt() : 0;
+            if (baseFee > 0 && baseMinutes > 0) {
+                return baseMinutes + "분 " + formatCurrency(baseFee);
+            } else if (baseFee == 0) {
+                return "무료";
+            }
+        }
+
+        return null;
+    }
+
+    private String extractAddFee(JsonNode extraInfo) {
+        if (extraInfo == null) {
+            return null;
+        }
+
+        // TS API 형식: "addFee": "10분당 500원"
+        if (extraInfo.has("addFee") && extraInfo.get("addFee").isTextual()) {
+            return extraInfo.get("addFee").asText();
+        }
+
+        // 공공데이터 형식: unitFee (숫자) + unitMinutes
+        if (extraInfo.has("unitFee") && extraInfo.get("unitFee").isNumber()) {
+            int unitFee = extraInfo.get("unitFee").asInt();
+            int unitMinutes = extraInfo.has("unitMinutes") ? extraInfo.get("unitMinutes").asInt() : 0;
+            if (unitFee > 0 && unitMinutes > 0) {
+                return unitMinutes + "분당 " + formatCurrency(unitFee);
+            }
+        }
+
+        return null;
+    }
+
+    private String extractDayMaxCrg(JsonNode extraInfo) {
+        if (extraInfo == null) {
+            return null;
+        }
+
+        // TS API 형식: "dayMaxCrg": 15000 (숫자)
+        if (extraInfo.has("dayMaxCrg") && extraInfo.get("dayMaxCrg").isNumber()) {
+            int dayMaxCrg = extraInfo.get("dayMaxCrg").asInt();
+            if (dayMaxCrg > 0) {
+                return formatCurrency(dayMaxCrg);
+            }
+        }
+
+        // 공공데이터 형식: "dailyMaxFee"
+        if (extraInfo.has("dailyMaxFee") && extraInfo.get("dailyMaxFee").isNumber()) {
+            int dailyMaxFee = extraInfo.get("dailyMaxFee").asInt();
+            if (dailyMaxFee > 0) {
+                return formatCurrency(dailyMaxFee);
+            }
+        }
+
+        return null;
+    }
+
+    private String extractStringField(JsonNode extraInfo, String fieldName) {
+        if (extraInfo == null || !extraInfo.has(fieldName)) {
+            return null;
+        }
+        JsonNode field = extraInfo.get(fieldName);
+        return field.isTextual() ? field.asText() : null;
+    }
+
+    private String formatCurrency(int amount) {
+        return NumberFormat.getNumberInstance(Locale.KOREA).format(amount) + "원";
     }
 }
