@@ -22,7 +22,7 @@ public class FacilityService {
     private final FacilityRepository facilityRepository;
 
     /**
-     * 시설 정보 저장/갱신
+     * 시설 정보 저장/갱신 (전체 업데이트)
      */
     @Transactional
     public Facility saveOrUpdate(FacilityEvent event) {
@@ -48,6 +48,27 @@ public class FacilityService {
         }
 
         return facilityRepository.save(facility);
+    }
+
+    /**
+     * 시설 상태만 업데이트 (부분 업데이트)
+     * - availableCount만 변경
+     * - 존재하지 않는 시설은 무시 (메타 정보 동기화 시 생성됨)
+     */
+    @Transactional
+    public Optional<Facility> updateStatus(FacilityEvent event) {
+        Optional<Facility> existingOpt = facilityRepository.findByExternalId(event.getExternalId());
+
+        if (existingOpt.isEmpty()) {
+            log.debug("Facility not found for status update, skipping: {}", event.getExternalId());
+            return Optional.empty();
+        }
+
+        Facility facility = existingOpt.get();
+        facility.updateAvailability(facility.getAvailability().getTotalCount(), event.getAvailableCount());
+
+        log.debug("Status updated: {} -> available={}", event.getExternalId(), event.getAvailableCount());
+        return Optional.of(facilityRepository.save(facility));
     }
 
     private Facility createFacility(FacilityEvent event) {

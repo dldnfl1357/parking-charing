@@ -4,21 +4,28 @@ server:
 spring:
   application:
     name: collection-service
+  main:
+    banner-mode: console
   kafka:
     bootstrap-servers: localhost:9092
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
 
+logging:
+  level:
+    root: INFO
+    com.example.collection: DEBUG
+  pattern:
+    console: "%d{HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
 collection:
   parking-api:
-    base-url: https://api.odcloud.kr/api
-    api-key: ${PARKING_API_KEY:your-api-key}
+    api-key: "459ff22d488569984e8067fbca79a067f15a0700e53e5fac83cda065638db8ac"
   charging-api:
-    base-url: https://apis.data.go.kr/B552584/EvCharger
     api-key: "459ff22d488569984e8067fbca79a067f15a0700e53e5fac83cda065638db8ac"
   schedule:
-    cron: "0 */5 * * * *"  # 5분마다
+    cron: "0 */5 * * * *"
 
 kafka:
   topic:

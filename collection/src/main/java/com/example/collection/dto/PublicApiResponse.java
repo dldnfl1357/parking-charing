@@ -70,35 +70,4 @@ public class PublicApiResponse<T> {
         @JsonProperty("일최대요금")
         private Integer dailyMaxFee;
     }
-
-    @Getter
-    @NoArgsConstructor
-    public static class ChargingData {
-        @JsonProperty("충전소코드")
-        private String chargingCode;
-
-        @JsonProperty("충전소명")
-        private String chargingName;
-
-        @JsonProperty("주소")
-        private String address;
-
-        @JsonProperty("위도")
-        private Double latitude;
-
-        @JsonProperty("경도")
-        private Double longitude;
-
-        @JsonProperty("충전기수")
-        private Integer totalChargers;
-
-        @JsonProperty("사용가능충전기수")
-        private Integer availableChargers;
-
-        @JsonProperty("충전기타입")
-        private String chargerType;
-
-        @JsonProperty("충전용량")
-        private String chargingCapacity;
-    }
 }

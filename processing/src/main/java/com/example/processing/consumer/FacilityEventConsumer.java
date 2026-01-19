@@ -9,6 +9,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
+import java.util.Optional;
+
 /**
  * Kafka 시설 이벤트 소비자
  */
@@ -27,8 +29,14 @@ public class FacilityEventConsumer {
         try {
             switch (event.getEventType()) {
                 case UPSERT -> {
+                    // 전체 정보 업데이트 (메타 + 상태)
                     Facility facility = facilityService.saveOrUpdate(event);
                     indexingService.index(facility);
+                }
+                case STATUS_UPDATE -> {
+                    // 상태만 업데이트 (availableCount만 변경)
+                    Optional<Facility> facilityOpt = facilityService.updateStatus(event);
+                    facilityOpt.ifPresent(indexingService::updateStatus);
                 }
                 case DELETE -> {
                     indexingService.delete(event.getExternalId());

@@ -40,4 +40,28 @@ public final class GeoUtils {
         return latitude >= -90.0 && latitude <= 90.0 &&
                 longitude >= -180.0 && longitude <= 180.0;
     }
+
+    /**
+     * 주어진 좌표와 반경으로 Bounding Box 계산
+     * MySQL 쿼리 최적화용 (인덱스 활용)
+     *
+     * @param lat 중심 위도
+     * @param lng 중심 경도
+     * @param radiusKm 반경 (km)
+     * @return [minLat, maxLat, minLng, maxLng]
+     */
+    public static double[] getBoundingBox(double lat, double lng, double radiusKm) {
+        // 위도 1도 = 약 111km
+        double latDelta = radiusKm / 111.0;
+
+        // 경도 1도 = 약 111km * cos(위도)
+        double lngDelta = radiusKm / (111.0 * Math.cos(Math.toRadians(lat)));
+
+        double minLat = lat - latDelta;
+        double maxLat = lat + latDelta;
+        double minLng = lng - lngDelta;
+        double maxLng = lng + lngDelta;
+
+        return new double[]{minLat, maxLat, minLng, maxLng};
+    }
 }

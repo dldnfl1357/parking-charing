@@ -21,13 +21,20 @@ spring:
     bootstrap-servers: localhost:9092
     consumer:
       group-id: processing-group
-      auto-offset-reset: earliest
+      auto-offset-reset: latest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       properties:
         spring.json.trusted.packages: com.example.common.event
   elasticsearch:
     uris: http://localhost:9200
+
+logging:
+  level:
+    root: INFO
+    com.example.processing: DEBUG
+  pattern:
+    console: "%d{HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
 
 kafka:
   topic:

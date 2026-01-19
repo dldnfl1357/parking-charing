@@ -1,12 +1,15 @@
 package com.example.collection.translator;
 
 import com.example.collection.dto.ChargingApiResponse;
+import com.example.collection.dto.ParkingInfoResponse;
+import com.example.collection.dto.ParkingOprResponse;
 import com.example.collection.dto.PublicApiResponse;
 import com.example.common.domain.FacilityType;
 import com.example.common.event.FacilityEvent;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
@@ -16,6 +19,7 @@ import java.util.Map;
 /**
  * ACL - 공공 API 데이터를 도메인 이벤트로 변환
  */
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class FacilityTranslator {
@@ -68,6 +72,8 @@ public class FacilityTranslator {
             lat = Double.parseDouble(item.getLat());
             lng = Double.parseDouble(item.getLng());
         } catch (NumberFormatException e) {
+            log.warn("Invalid coordinates for charger {}: lat={}, lng={}",
+                    item.getStatId(), item.getLat(), item.getLng());
             return null;
         }
 
@@ -108,10 +114,60 @@ public class FacilityTranslator {
                 .build();
     }
 
+    /**
+     * 주차장 시설정보 + 운영정보 → FacilityEvent (한국교통안전공단 API)
+     *
+     * @param infoItem 시설정보 (필수)
+     * @param oprItem 운영정보 (optional, null 가능)
+     */
+    public FacilityEvent translateParkingTS(ParkingInfoResponse.ParkingInfoItem infoItem,
+                                            ParkingOprResponse.ParkingOprItem oprItem) {
+        if (!infoItem.isValid()) {
+            return null;
+        }
+
+        String externalId = "TS_" + infoItem.getExternalId();  // 한국교통안전공단 prefix
+
+        int totalCount = infoItem.getTotalCount();
+        int availableCount = totalCount;  // 초기값은 전체 (실시간 데이터로 업데이트됨)
+
+        Map<String, Object> extraInfo = new HashMap<>();
+        extraInfo.put("source", "TS");  // 한국교통안전공단
+
+        // 운영정보가 있으면 추가
+        if (oprItem != null) {
+            extraInfo.put("weekdayOperTime", oprItem.getWeekdayOperTime());
+            extraInfo.put("baseFee", oprItem.getBaseFeeInfo());
+            extraInfo.put("addFee", oprItem.getAddFeeInfo());
+            extraInfo.put("dayMaxCrg", oprItem.getDayMaxCrg());
+        }
+
+        return FacilityEvent.builder()
+                .externalId(externalId)
+                .type(FacilityType.PARKING)
+                .name(infoItem.getName())
+                .latitude(infoItem.getLatitude())
+                .longitude(infoItem.getLongitude())
+                .address(infoItem.getAddress())
+                .totalCount(totalCount)
+                .availableCount(availableCount)
+                .extraInfo(toJson(extraInfo))
+                .collectedAt(LocalDateTime.now())
+                .build();
+    }
+
+    /**
+     * 주차장 시설정보만으로 FacilityEvent 생성 (운영정보 없음)
+     */
+    public FacilityEvent translateParkingTS(ParkingInfoResponse.ParkingInfoItem infoItem) {
+        return translateParkingTS(infoItem, null);
+    }
+
     private String toJson(Map<String, Object> map) {
         try {
             return objectMapper.writeValueAsString(map);
         } catch (JsonProcessingException e) {
+            log.error("Failed to serialize extraInfo: {}", e.getMessage());
             return "{}";
         }
     }

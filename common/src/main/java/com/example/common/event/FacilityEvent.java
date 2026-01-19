@@ -42,7 +42,20 @@ public class FacilityEvent {
      * 이벤트 유형
      */
     public enum EventType {
-        UPSERT,
+        UPSERT,         // 전체 정보 생성/수정 (메타 + 상태)
+        STATUS_UPDATE,  // 상태만 업데이트 (availableCount만 변경)
         DELETE
+    }
+
+    /**
+     * 상태 업데이트 이벤트 생성 (부분 업데이트용)
+     */
+    public static FacilityEvent statusUpdate(String externalId, int availableCount, LocalDateTime collectedAt) {
+        return FacilityEvent.builder()
+                .eventType(EventType.STATUS_UPDATE)
+                .externalId(externalId)
+                .availableCount(availableCount)
+                .collectedAt(collectedAt)
+                .build();
     }
 }

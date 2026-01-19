@@ -5,7 +5,7 @@ import co.elastic.clients.elasticsearch._types.SortOrder;
 import co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 import co.elastic.clients.json.JsonData;
-import com.example.api.document.ChargerDocument;
+import com.example.api.document.ParkingDocument;
 import com.example.common.domain.FacilityType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -16,28 +16,31 @@ import org.springframework.data.elasticsearch.core.SearchHits;
 import org.springframework.stereotype.Repository;
 
 /**
- * ElasticSearch 충전소 검색 리포지토리
+ * ElasticSearch 주차장 검색 리포지토리
  */
 @Slf4j
 @Repository
 @RequiredArgsConstructor
-public class ChargerSearchRepository {
+public class ParkingSearchRepository {
 
     private final ElasticsearchOperations elasticsearchOperations;
 
     /**
-     * 위치 기반 충전소 검색
+     * 위치 기반 주차장 검색
      */
-    public SearchHits<ChargerDocument> search(
+    public SearchHits<ParkingDocument> search(
             Double lat, Double lng, double radiusKm,
-            String chgerType, Boolean available, Boolean parkingFree,
+            Boolean available, Boolean free,
             int page, int size) {
+
+        log.info("Parking search request: lat={}, lng={}, radius={}km, available={}, free={}, page={}, size={}",
+                lat, lng, radiusKm, available, free, page, size);
 
         BoolQuery.Builder boolBuilder = new BoolQuery.Builder();
 
-        // 충전소 타입 필터
+        // 주차장 타입 필터
         boolBuilder.filter(Query.of(q -> q
-                .term(t -> t.field("type").value(FacilityType.CHARGING.name()))));
+                .term(t -> t.field("type").value(FacilityType.PARKING.name()))));
 
         // 거리 필터 (위치가 주어진 경우)
         if (lat != null && lng != null) {
@@ -49,22 +52,16 @@ public class ChargerSearchRepository {
                             .distanceType(GeoDistanceType.Arc))));
         }
 
-        // 충전기 타입 필터 (extraInfo에서)
-        if (chgerType != null) {
-            boolBuilder.filter(Query.of(q -> q
-                    .match(m -> m.field("extraInfo").query(chgerType))));
-        }
-
-        // 사용 가능 필터
+        // 주차 가능 필터
         if (available != null && available) {
             boolBuilder.filter(Query.of(q -> q
                     .range(r -> r.field("availableCount").gt(JsonData.of(0)))));
         }
 
-        // 주차 무료 필터 (extraInfo에서)
-        if (parkingFree != null && parkingFree) {
+        // 무료 주차장 필터 (extraInfo에서)
+        if (free != null && free) {
             boolBuilder.filter(Query.of(q -> q
-                    .match(m -> m.field("extraInfo").query("parkingFree\":\"Y"))));
+                    .match(m -> m.field("extraInfo").query("무료"))));
         }
 
         NativeQuery query;
@@ -88,6 +85,10 @@ public class ChargerSearchRepository {
                     .build();
         }
 
-        return elasticsearchOperations.search(query, ChargerDocument.class);
+        SearchHits<ParkingDocument> hits = elasticsearchOperations.search(query, ParkingDocument.class);
+        log.info("Parking search result: totalHits={}, returned={}",
+                hits.getTotalHits(), hits.getSearchHits().size());
+
+        return hits;
     }
 }

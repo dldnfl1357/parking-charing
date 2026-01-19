@@ -10,7 +10,10 @@
       "Bash(gradle wrapper:*)",
       "Bash(./gradlew:*)",
       "Bash(curl:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(wc:*)",
+      "Bash(xargs cat:*)",
+      "Bash(grep:*)"
     ]
   }
 }
