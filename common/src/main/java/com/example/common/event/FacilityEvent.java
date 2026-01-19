@@ -1,13 +1,13 @@
 package com.example.common.event;
 
 import com.example.common.domain.FacilityType;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.time.Instant;
-import java.util.Map;
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 /**
@@ -25,12 +25,18 @@ public class FacilityEvent {
     @Builder.Default
     private EventType eventType = EventType.UPSERT;
 
-    private FacilityType facilityType;
+    private String externalId;
+    private FacilityType type;
+    private String name;
+    private String address;
+    private double latitude;
+    private double longitude;
+    private int totalCount;
+    private int availableCount;
+    private String extraInfo;
 
-    @Builder.Default
-    private Instant timestamp = Instant.now();
-
-    private FacilityPayload payload;
+    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
+    private LocalDateTime collectedAt;
 
     /**
      * 이벤트 유형
@@ -38,23 +44,5 @@ public class FacilityEvent {
     public enum EventType {
         UPSERT,
         DELETE
-    }
-
-    /**
-     * 시설 정보 페이로드
-     */
-    @Getter
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class FacilityPayload {
-        private String externalId;
-        private String name;
-        private String address;
-        private double latitude;
-        private double longitude;
-        private int totalCount;
-        private int availableCount;
-        private Map<String, Object> extraInfo;
     }
 }
