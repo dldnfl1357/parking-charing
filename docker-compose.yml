@@ -30,15 +30,15 @@ services:
     volumes:
       - es-data:/usr/share/elasticsearch/data
 
-  kibana:
-    image: docker.elastic.co/kibana/kibana:8.11.3
-    container_name: parking-kibana
-    environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-    ports:
-      - "5601:5601"
-    depends_on:
-      - elasticsearch
+  #kibana:
+  #  image: docker.elastic.co/kibana/kibana:8.11.3
+  #  container_name: parking-kibana
+  #  environment:
+  #    - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+  #  ports:
+  #    - "5601:5601"
+  #  depends_on:
+  #    - elasticsearch
 
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.3
@@ -87,17 +87,17 @@ services:
     volumes:
       - redis-data:/data
 
-  kafka-ui:
-    image: provectuslabs/kafka-ui:latest
-    container_name: parking-kafka-ui
-    depends_on:
-      - kafka
-    ports:
-      - "8090:8080"
-    environment:
-      - KAFKA_CLUSTERS_0_NAME=local
-      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092
-      - KAFKA_CLUSTERS_0_ZOOKEEPER=zookeeper:2181
+  #kafka-ui:
+  #  image: provectuslabs/kafka-ui:latest
+  #  container_name: parking-kafka-ui
+  #  depends_on:
+  #    - kafka
+  #  ports:
+  #    - "8090:8080"
+  #  environment:
+  #    - KAFKA_CLUSTERS_0_NAME=local
+  #    - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092
+  #    - KAFKA_CLUSTERS_0_ZOOKEEPER=zookeeper:2181
 
 volumes:
   mysql-data:
