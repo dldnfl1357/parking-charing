@@ -30,6 +30,16 @@ public class ParkingSearchController {
     }
 
     /**
+     * 주차장 검색 (ES, 캐시 우회) - 벤치마크용
+     * GET /api/v1/parkings/search/es
+     */
+    @GetMapping("/search/es")
+    public ResponseEntity<List<ParkingResponse>> searchByEs(ParkingSearchRequest request) {
+        List<ParkingResponse> result = parkingSearchService.searchNoCache(request);
+        return ResponseEntity.ok(result);
+    }
+
+    /**
      * 주차장 검색 (MySQL) - 벤치마크용
      * GET /api/v1/parkings/search/mysql
      *

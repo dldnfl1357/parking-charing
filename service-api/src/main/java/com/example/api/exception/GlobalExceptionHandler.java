@@ -1,6 +1,7 @@
 package com.example.api.exception;
 
 import lombok.extern.slf4j.Slf4j;
+import org.apache.catalina.connector.ClientAbortException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
@@ -44,6 +45,13 @@ public class GlobalExceptionHandler {
         log.warn("Validation failed: {}", errors);
         return ResponseEntity.badRequest()
                 .body(ErrorResponse.of(HttpStatus.BAD_REQUEST, "유효성 검사 실패", errors));
+    }
+
+    @ExceptionHandler(ClientAbortException.class)
+    public void handleClientAbort(ClientAbortException e) {
+        // 클라이언트가 연결을 끊은 경우 (타임아웃, 새로고침 등)
+        // 서버 문제가 아니므로 WARN 레벨로 간단히 로깅
+        log.warn("Client aborted connection: {}", e.getMessage());
     }
 
     @ExceptionHandler(Exception.class)

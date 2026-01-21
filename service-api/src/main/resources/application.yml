@@ -32,6 +32,30 @@ spring:
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
   elasticsearch:
     uris: http://localhost:9200
+    connection-timeout: 5s
+    socket-timeout: 30s
+
+  # Redis 캐싱 설정
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 500ms
+      connect-timeout: 500ms
+      lettuce:
+        pool:
+          max-active: 100
+          max-idle: 50
+          min-idle: 10
+          max-wait: 500ms
+
+  cache:
+    type: redis
+    redis:
+      time-to-live: 60000  # 기본 TTL 1분
+      cache-null-values: false
+      use-key-prefix: true
+      key-prefix: "parking:"
 
 kafka:
   topic:

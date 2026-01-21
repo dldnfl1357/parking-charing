@@ -4,8 +4,10 @@ import com.example.common.domain.FacilityType;
 import com.example.common.domain.entity.Facility;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
@@ -77,4 +79,12 @@ public interface FacilityRepository extends JpaRepository<Facility, Long> {
             @Param("minLng") double minLng,
             @Param("maxLng") double maxLng,
             Pageable pageable);
+
+    /**
+     * 테스트 데이터 삭제 (externalId prefix 기준)
+     */
+    @Modifying
+    @Transactional
+    @Query("DELETE FROM Facility f WHERE f.externalId LIKE :prefix%")
+    long deleteByExternalIdStartingWith(@Param("prefix") String prefix);
 }

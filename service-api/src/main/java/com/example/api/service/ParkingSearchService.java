@@ -5,10 +5,12 @@ import com.example.api.dto.ParkingResponse;
 import com.example.api.dto.ParkingSearchRequest;
 import com.example.api.repository.FacilityRepository;
 import com.example.api.repository.ParkingSearchRepository;
+import com.example.api.util.CacheKeyGenerator;
 import com.example.common.domain.FacilityType;
 import com.example.common.domain.entity.Facility;
 import com.example.common.util.GeoUtils;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -16,14 +18,16 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.elasticsearch.core.SearchHit;
 import org.springframework.data.elasticsearch.core.SearchHits;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.text.NumberFormat;
+import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 
 /**
- * 주차장 검색 서비스 (MySQL / ElasticSearch)
+ * 주차장 검색 서비스 (MySQL / ElasticSearch / Redis 캐싱)
  */
 @Slf4j
 @Service
@@ -33,11 +37,75 @@ public class ParkingSearchService {
     private final ParkingSearchRepository parkingSearchRepository;
     private final FacilityRepository facilityRepository;
     private final ObjectMapper objectMapper;
+    private final org.springframework.data.redis.core.StringRedisTemplate stringRedisTemplate;
+
+    private static final String CACHE_PREFIX = "parking:search:";
+    private static final Duration SEARCH_CACHE_TTL = Duration.ofMinutes(1);
+
+    // 캐시 통계 (디버깅용)
+    private final java.util.concurrent.atomic.AtomicLong cacheHitCount = new java.util.concurrent.atomic.AtomicLong(0);
+    private final java.util.concurrent.atomic.AtomicLong cacheMissCount = new java.util.concurrent.atomic.AtomicLong(0);
+    private final java.util.concurrent.atomic.AtomicLong cacheErrorCount = new java.util.concurrent.atomic.AtomicLong(0);
 
     /**
-     * 위치 기반 주차장 검색 (ES)
+     * 위치 기반 주차장 검색 (ES + Redis 캐싱)
      */
     public List<ParkingResponse> search(ParkingSearchRequest request) {
+        String cacheKey = CACHE_PREFIX + CacheKeyGenerator.generateSearchKey(request);
+
+        // 1. 캐시 조회
+        long redisStart = System.currentTimeMillis();
+        List<ParkingResponse> cached = getFromCache(cacheKey);
+        long redisTime = System.currentTimeMillis() - redisStart;
+
+        if (cached != null) {
+            long hitCount = cacheHitCount.incrementAndGet();
+            if (hitCount % 1000 == 0) {
+                logCacheStats();
+            }
+            log.debug("[Cache HIT] key={}, redisTime={}ms", cacheKey, redisTime);
+            return cached;
+        }
+
+        long missCount = cacheMissCount.incrementAndGet();
+        log.debug("[Cache MISS] key={}, redisCheckTime={}ms", cacheKey, redisTime);
+
+        // 2. ES 검색
+        long esStart = System.currentTimeMillis();
+        List<ParkingResponse> result = searchFromElasticsearch(request);
+        long esTime = System.currentTimeMillis() - esStart;
+
+        // 3. 캐시 저장
+        long saveStart = System.currentTimeMillis();
+        saveToCache(cacheKey, result);
+        long saveTime = System.currentTimeMillis() - saveStart;
+
+        if (missCount % 100 == 0) {
+            log.info("[Cache MISS #{}} redisCheck={}ms, esQuery={}ms, redisSave={}ms",
+                    missCount, redisTime, esTime, saveTime);
+        }
+
+        return result;
+    }
+
+    private void logCacheStats() {
+        long hits = cacheHitCount.get();
+        long misses = cacheMissCount.get();
+        long errors = cacheErrorCount.get();
+        long total = hits + misses;
+        double hitRate = total > 0 ? (hits * 100.0 / total) : 0;
+        log.info("[Cache Stats] hits={}, misses={}, errors={}, hitRate={}%",
+                hits, misses, errors, String.format("%.1f", hitRate));
+    }
+
+    /**
+     * 위치 기반 주차장 검색 (ES, 캐시 우회)
+     */
+    public List<ParkingResponse> searchNoCache(ParkingSearchRequest request) {
+        return searchFromElasticsearch(request);
+    }
+
+    private List<ParkingResponse> searchFromElasticsearch(ParkingSearchRequest request) {
         SearchHits<ParkingDocument> hits = parkingSearchRepository.search(
                 request.getLat(),
                 request.getLng(),
@@ -51,6 +119,47 @@ public class ParkingSearchService {
         return hits.getSearchHits().stream()
                 .map(this::toResponse)
                 .toList();
+    }
+
+    private List<ParkingResponse> getFromCache(String key) {
+        try {
+            String json = stringRedisTemplate.opsForValue().get(key);
+            if (json != null) {
+                return objectMapper.readValue(json, new TypeReference<List<ParkingResponse>>() {});
+            }
+        } catch (Exception e) {
+            cacheErrorCount.incrementAndGet();
+            log.warn("[Cache] Read failed: key={}, error={}", key, e.getMessage());
+        }
+        return null;
+    }
+
+    private void saveToCache(String key, List<ParkingResponse> result) {
+        try {
+            if (result != null && !result.isEmpty()) {
+                String json = objectMapper.writeValueAsString(result);
+                stringRedisTemplate.opsForValue().set(key, json, SEARCH_CACHE_TTL);
+                log.debug("[Cache] Saved: key={}, size={}", key, result.size());
+            }
+        } catch (Exception e) {
+            cacheErrorCount.incrementAndGet();
+            log.warn("[Cache] Write failed: key={}, error={}", key, e.getMessage());
+        }
+    }
+
+    /**
+     * 검색 캐시 무효화
+     */
+    public void evictSearchCache() {
+        try {
+            var keys = stringRedisTemplate.keys(CACHE_PREFIX + "*");
+            if (keys != null && !keys.isEmpty()) {
+                stringRedisTemplate.delete(keys);
+                log.info("[Cache] Evicted {} keys", keys.size());
+            }
+        } catch (Exception e) {
+            log.warn("[Cache] Eviction failed: {}", e.getMessage());
+        }
     }
 
     private ParkingResponse toResponse(SearchHit<ParkingDocument> hit) {
@@ -67,7 +176,7 @@ public class ParkingSearchService {
         JsonNode extraInfo = parseExtraInfo(doc.getExtraInfo());
 
         return ParkingResponse.builder()
-                .id(doc.getId() != null ? Long.parseLong(doc.getId()) : null)
+                .id(parseIdSafely(doc.getId()))
                 .externalId(doc.getExternalId())
                 .name(doc.getName())
                 .address(doc.getAddress())
@@ -243,5 +352,17 @@ public class ParkingSearchService {
 
     private String formatCurrency(int amount) {
         return NumberFormat.getNumberInstance(Locale.KOREA).format(amount) + "원";
+    }
+
+    private Long parseIdSafely(String id) {
+        if (id == null || id.isBlank()) {
+            return null;
+        }
+        try {
+            return Long.parseLong(id);
+        } catch (NumberFormatException e) {
+            // 숫자가 아닌 ID (예: TEST_xxx)는 null 반환
+            return null;
+        }
     }
 }
