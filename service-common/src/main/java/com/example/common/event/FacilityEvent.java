@@ -40,11 +40,19 @@ public class FacilityEvent {
 
     /**
      * 이벤트 유형
+     *
+     * 공공 API는 updatedAt을 제공하지 않으므로 해시 기반 변경 감지 사용:
+     * - 시설정보/운영정보: 필드 해시 비교 → 변경 시 이벤트 발행
+     * - 실시간정보: 값 직접 비교 → 변경 시 이벤트 발행
      */
     public enum EventType {
-        UPSERT,         // 전체 정보 생성/수정 (메타 + 상태)
-        STATUS_UPDATE,  // 상태만 업데이트 (availableCount만 변경)
-        DELETE
+        FACILITY_CREATED,     // 신규 시설 등록
+        FACILITY_UPDATED,     // 시설정보 변경 (이름, 주소, 좌표, 총주차면)
+        OPERATION_UPDATED,    // 운영정보 변경 (요금, 운영시간)
+        AVAILABILITY_CHANGED, // 가용성 변경 (availableCount)
+        FACILITY_DELETED,     // 시설 삭제
+        UPSERT,               // 전체 정보 생성/수정 (하위 호환)
+        STATUS_UPDATE         // 상태만 업데이트 (하위 호환)
     }
 
     /**
@@ -55,6 +63,30 @@ public class FacilityEvent {
                 .eventType(EventType.STATUS_UPDATE)
                 .externalId(externalId)
                 .availableCount(availableCount)
+                .collectedAt(collectedAt)
+                .build();
+    }
+
+    /**
+     * 가용성 변경 이벤트 생성 (실시간 정보용)
+     */
+    public static FacilityEvent availabilityChanged(String externalId, int availableCount, LocalDateTime collectedAt) {
+        return FacilityEvent.builder()
+                .eventType(EventType.AVAILABILITY_CHANGED)
+                .externalId(externalId)
+                .availableCount(availableCount)
+                .collectedAt(collectedAt)
+                .build();
+    }
+
+    /**
+     * 운영정보 변경 이벤트 생성
+     */
+    public static FacilityEvent operationUpdated(String externalId, String extraInfo, LocalDateTime collectedAt) {
+        return FacilityEvent.builder()
+                .eventType(EventType.OPERATION_UPDATED)
+                .externalId(externalId)
+                .extraInfo(extraInfo)
                 .collectedAt(collectedAt)
                 .build();
     }

@@ -8,8 +8,11 @@ import com.example.collection.dto.ParkingInfoResponse;
 import com.example.collection.dto.ParkingOprResponse;
 import com.example.collection.dto.ParkingRealtimeResponse;
 import com.example.collection.producer.FacilityEventProducer;
+import com.example.collection.service.ChangeDetectionService;
 import com.example.collection.translator.FacilityTranslator;
 import com.example.common.event.FacilityEvent;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -37,6 +40,8 @@ public class CollectionScheduler {
     private final TsParkingApiClient tsParkingApiClient;
     private final FacilityTranslator facilityTranslator;
     private final FacilityEventProducer facilityEventProducer;
+    private final ChangeDetectionService changeDetectionService;
+    private final ObjectMapper objectMapper;
 
     private static final int PAGE_SIZE = 100;
     private static final int MAX_PAGES = 100;
@@ -131,10 +136,15 @@ public class CollectionScheduler {
 
     /**
      * 주차장 메타 정보 수집 (1일 1회, 새벽 4시) - 한국교통안전공단
+     *
+     * 변경 감지 전략:
+     * - 시설정보: 이름, 주소, 좌표, 총주차면 해시 비교
+     * - 운영정보: 요금, 운영시간 해시 비교
+     * - 변경된 항목만 이벤트 발행
      */
     @Scheduled(cron = "0 0 4 * * *")
     public void collectParkingInfoTS() {
-        log.info("Starting TS parking info collection (daily full sync)");
+        log.info("Starting TS parking info collection (daily with change detection)");
 
         try {
             // 1단계: 시설정보 수집
@@ -145,34 +155,113 @@ public class CollectionScheduler {
             Map<String, ParkingOprResponse.ParkingOprItem> oprMap = collectAllParkingOpr();
             log.info("Collected {} parking operation records", oprMap.size());
 
-            // 3단계: 병합하여 이벤트 발행
-            int totalPublished = 0;
+            // 3단계: 변경 감지 후 이벤트 발행
+            int facilityCreated = 0;
+            int facilityUpdated = 0;
+            int operationUpdated = 0;
+            int unchanged = 0;
+
+            LocalDateTime now = LocalDateTime.now();
+
             for (Map.Entry<String, ParkingInfoResponse.ParkingInfoItem> entry : infoMap.entrySet()) {
+                String externalId = "TS_" + entry.getKey();
                 ParkingInfoResponse.ParkingInfoItem infoItem = entry.getValue();
                 ParkingOprResponse.ParkingOprItem oprItem = oprMap.get(entry.getKey());
 
-                FacilityEvent event = facilityTranslator.translateParkingTS(infoItem, oprItem);
-                if (event != null) {
-                    facilityEventProducer.publish(event);
-                    totalPublished++;
+                if (!infoItem.isValid()) {
+                    continue;
+                }
+
+                // 시설정보 변경 감지
+                boolean isFacilityChanged = changeDetectionService.isFacilityInfoChanged(
+                        externalId,
+                        infoItem.getName(),
+                        infoItem.getAddress(),
+                        infoItem.getLatitude(),
+                        infoItem.getLongitude(),
+                        infoItem.getTotalCount()
+                );
+
+                // 운영정보 변경 감지
+                String operationHash = buildOperationHashInput(oprItem);
+                boolean isOperationChanged = changeDetectionService.isOperationInfoChanged(
+                        externalId, operationHash);
+
+                if (isFacilityChanged && !changeDetectionService.facilityExists(externalId)) {
+                    // 신규 시설 - 전체 정보 이벤트 발행
+                    FacilityEvent event = facilityTranslator.translateParkingTS(infoItem, oprItem);
+                    if (event != null) {
+                        facilityEventProducer.publish(event);
+                        facilityCreated++;
+                    }
+                } else {
+                    // 기존 시설
+                    if (isFacilityChanged) {
+                        // 시설정보만 변경 이벤트 발행
+                        FacilityEvent event = facilityTranslator.translateParkingTS(infoItem, oprItem);
+                        if (event != null) {
+                            facilityEventProducer.publish(event);
+                            facilityUpdated++;
+                        }
+                    } else if (isOperationChanged && oprItem != null) {
+                        // 운영정보만 변경 이벤트 발행
+                        String extraInfo = buildOperationExtraInfo(oprItem);
+                        FacilityEvent event = FacilityEvent.operationUpdated(externalId, extraInfo, now);
+                        facilityEventProducer.publish(event);
+                        operationUpdated++;
+                    } else {
+                        unchanged++;
+                    }
                 }
             }
 
-            log.info("Completed TS parking info collection: {} records published", totalPublished);
+            log.info("Completed TS parking info collection: created={}, facilityUpdated={}, " +
+                            "operationUpdated={}, unchanged={}",
+                    facilityCreated, facilityUpdated, operationUpdated, unchanged);
         } catch (Exception e) {
             log.error("Error during TS parking info collection", e);
         }
     }
 
+    private String buildOperationHashInput(ParkingOprResponse.ParkingOprItem oprItem) {
+        if (oprItem == null) {
+            return "";
+        }
+        return oprItem.getBaseFeeInfo() + "|" + oprItem.getAddFeeInfo() + "|" +
+                oprItem.getWeekdayOperTime() + "|" +
+                (oprItem.getDayMaxCrg() != null ? oprItem.getDayMaxCrg() : "");
+    }
+
+    private String buildOperationExtraInfo(ParkingOprResponse.ParkingOprItem oprItem) {
+        try {
+            Map<String, Object> extraInfo = new HashMap<>();
+            extraInfo.put("baseFee", oprItem.getBaseFeeInfo());
+            extraInfo.put("addFee", oprItem.getAddFeeInfo());
+            extraInfo.put("weekdayOperTime", oprItem.getWeekdayOperTime());
+            if (oprItem.getDayMaxCrg() != null) {
+                extraInfo.put("dayMaxCrg", oprItem.getDayMaxCrg());
+            }
+            return objectMapper.writeValueAsString(extraInfo);
+        } catch (JsonProcessingException e) {
+            log.warn("Failed to build operation extraInfo", e);
+            return "{}";
+        }
+    }
+
     /**
      * 주차장 실시간 정보 수집 (5분마다) - 한국교통안전공단
+     *
+     * 변경 감지 전략:
+     * - availableCount 값 직접 비교
+     * - 변경된 주차장만 이벤트 발행
      */
     @Scheduled(fixedRate = 300000, initialDelay = 300000)
     public void collectParkingRealtimeTS() {
-        log.info("Starting TS parking realtime collection (delta update)");
+        log.info("Starting TS parking realtime collection (with change detection)");
 
         int pageNo = 1;
-        int totalCollected = 0;
+        int changedCount = 0;
+        int unchangedCount = 0;
 
         try {
             while (pageNo <= MAX_PAGES) {
@@ -183,17 +272,23 @@ public class CollectionScheduler {
                 }
 
                 LocalDateTime now = LocalDateTime.now();
-                List<FacilityEvent> events = response.getItemList().stream()
-                        .map(item -> FacilityEvent.statusUpdate(
-                                "TS_" + item.getExternalId(),
-                                item.getAvailableCount(),
-                                now))
-                        .toList();
 
-                events.forEach(facilityEventProducer::publish);
-                totalCollected += events.size();
+                for (ParkingRealtimeResponse.ParkingRealtimeItem item : response.getItemList()) {
+                    String externalId = "TS_" + item.getExternalId();
+                    int availableCount = item.getAvailableCount();
 
-                log.debug("Page {}: {} realtime updates", pageNo, events.size());
+                    // 변경 감지 - 값 직접 비교
+                    if (changeDetectionService.isAvailabilityChanged(externalId, availableCount)) {
+                        FacilityEvent event = FacilityEvent.availabilityChanged(
+                                externalId, availableCount, now);
+                        facilityEventProducer.publish(event);
+                        changedCount++;
+                    } else {
+                        unchangedCount++;
+                    }
+                }
+
+                log.debug("Page {}: processed {} items", pageNo, response.getItemList().size());
 
                 if (response.getItemList().size() < PAGE_SIZE ||
                     pageNo * PAGE_SIZE >= response.getTotalCount()) {
@@ -203,7 +298,8 @@ public class CollectionScheduler {
                 pageNo++;
             }
 
-            log.info("Completed TS parking realtime collection: {} updates", totalCollected);
+            log.info("Completed TS parking realtime collection: changed={}, unchanged={}",
+                    changedCount, unchangedCount);
         } catch (Exception e) {
             log.error("Error during TS parking realtime collection", e);
         }

@@ -6,6 +6,10 @@ spring:
     name: collection-service
   main:
     banner-mode: console
+  data:
+    redis:
+      host: localhost
+      port: 6380
   kafka:
     bootstrap-servers: localhost:9092
     producer:
